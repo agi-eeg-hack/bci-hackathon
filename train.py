@@ -5,7 +5,7 @@ from mistral.model import Transformer
 from mistral.tokenizer import Tokenizer
 from pathlib import Path
 import torch.nn.functional as F
-
+from tqdm import tqdm
 
 @dataclass
 class TrainConfig:
@@ -30,7 +30,7 @@ def train(config: TrainConfig):
         Path(config.model_path), max_batch_size=config.batch_size
     )
 
-    model.to(DEVICE)
+    # model.to(DEVICE)
     # tokenizer = Tokenizer(str(Path(config.model_path) / "tokenizer.model"))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
@@ -39,11 +39,11 @@ def train(config: TrainConfig):
     for epoch in range(config.epochs):
         model.train()
 
-        for x, _ in train_dataloader:
-            x: torch.Tensor = x["encoder_cont"].to(device=DEVICE, dtype=DTYPE)  # dont ask...
+        for x, _ in tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{config.epochs}"):
+            databatch: torch.Tensor = x["encoder_cont"].to(device=DEVICE, dtype=DTYPE)  # dont ask...
 
-            x = x[:, :-1, :]
-            y = x[:, 1:, :]
+            x = databatch[:, :-1, :]
+            y = databatch[:, 1:, :]
 
             b, t, c = x.shape
             y_hat = model(x, seqlens=[c] * b)
@@ -55,7 +55,7 @@ def train(config: TrainConfig):
             loss.backward()
             optimizer.step()
 
-        print(f"Epoch [{epoch+1}/{config.epochs}], Loss: {loss.item():.4f}")
+        print(f"l: {loss.item():.4f}, e [{epoch+1}/{config.epochs}]")
 
     # Save the fine-tuned model
     torch.save(model.state_dict(), "finetuned_model.pth")
