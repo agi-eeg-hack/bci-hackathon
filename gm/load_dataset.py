@@ -2,7 +2,7 @@ import pandas as pd
 from pytorch_forecasting import TimeSeriesDataSet
 
 
-def read_csv_neurosity_dataset(file):
+def read_csv_neurosity_dataset(file, batch_size: int):
     data = pd.read_csv(file)
 
     max_encoder_length = 257
@@ -54,7 +54,6 @@ def read_csv_neurosity_dataset(file):
     training = TimeSeriesDataSet.from_dataset(
         training, data.head(N), min_prediction_idx=0, stop_randomization=True
     )
-    batch_size = 128
     train_dataloader = training.to_dataloader(
         train=True, batch_size=batch_size, num_workers=2
     )
@@ -65,18 +64,14 @@ def read_csv_neurosity_dataset(file):
     return train_dataloader, val_dataloader, training
 
 
-
-
 if __name__ == "__main__":
     train_dataloader, val_dataloader, training = read_csv_neurosity_dataset(
         "/workspace/evan/hack/gm/combined_dataset_finetune.csv"
     )
-    
+
     for x, y in train_dataloader:
-        x['encoder_cont'] # b, ts, c
+        x["encoder_cont"]  # b, ts, c
         # np.stack y 10 features take the 8 chans
-        # y is a python list y[0] is the list of 
+        # y is a python list y[0] is the list of
 
         # yt=np.concatenate(y[0][:8], axis=1) # b, c
-
-

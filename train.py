@@ -11,19 +11,18 @@ import torch.nn.functional as F
 class TrainConfig:
     model_path: str = "./models/mistral-tar"
     data_path: str = "./gm/combined_dataset_finetune.csv"
-    data_path: str = "."
     epochs: int = 10
-    batch_size: int = 8
+    batch_size: int = 128
     learning_rate: float = 1e-5
 
 
 config = TrainConfig()
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DTYPE = torch.float16
 
 train_dataloader, val_dataloader, training = read_csv_neurosity_dataset(
-    config.data_path
+    config.data_path, batch_size=config.batch_size
 )
-
 
 def train(config: TrainConfig):
     # Load the pretrained model and tokenizer
@@ -41,12 +40,14 @@ def train(config: TrainConfig):
         model.train()
 
         for x, _ in train_dataloader:
-            x: torch.Tensor = x["encoder_cont"]  # dont ask...
-            # x: batch, time, channel
-            
-            x = x.view(-1, x.shape[-1])  # squash batch into time dim
-            y = x[1:, :]  
-            y_hat = model(x[:-1, :], seqlens=[x.numel() // x.shape[-1] - 1])
+            x: torch.Tensor = x["encoder_cont"].to(device=DEVICE, dtype=DTYPE)  # dont ask...
+
+            x = x[:, :-1, :]
+            y = x[:, 1:, :]
+
+            b, t, c = x.shape
+            y_hat = model(x, seqlens=[c] * b)
+
             loss = F.mse_loss(y_hat, y)
 
             # Backward pass and optimization

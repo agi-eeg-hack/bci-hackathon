@@ -15,10 +15,12 @@ from mistral.moe import MoeArgs, MoeLayer
 
 from xformers.ops.fmha import memory_efficient_attention
 
+# hacky af
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 @dataclass
 class ModelArgs(Serializable):
-    in_samples: int = 256
     dim: int
     n_layers: int
     head_dim: int
@@ -36,6 +38,10 @@ class ModelArgs(Serializable):
     sliding_window: Optional[int] = None
     # If this is set, we will use MoE layers instead of dense layers.
     moe: Optional[MoeArgs] = None
+
+    # new
+    in_samples: int = 256
+
 
 
 @dataclass
@@ -117,16 +123,6 @@ class Attention(nn.Module):
         return self.wo(output.view(seqlen_sum, self.n_heads * self.head_dim))
 
 
-class FeedForward(nn.Module):
-    def __init__(self, args: ModelArgs):
-        super().__init__()
-
-        self.w1 = nn.Linear(args.dim, args.hidden_dim, bias=False)
-        self.w2 = nn.Linear(args.hidden_dim, args.dim, bias=False)
-        self.w3 = nn.Linear(args.dim, args.hidden_dim, bias=False)
-
-    def forward(self, x) -> torch.Tensor:
-        return self.w2(nn.functional.silu(self.w1(x)) * self.w3(x))
 
 
 class RMSNorm(torch.nn.Module):
@@ -172,12 +168,37 @@ class TransformerBlock(nn.Module):
         out = h + r
         return out
 
+
+class FeedForward(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+
+        self.w1 = nn.Linear(args.dim, args.hidden_dim, bias=False)
+        self.w2 = nn.Linear(args.hidden_dim, args.dim, bias=False)
+        self.w3 = nn.Linear(args.dim, args.hidden_dim, bias=False)
+
+    def forward(self, x) -> torch.Tensor:
+        return self.w2(nn.functional.silu(self.w1(x)) * self.w3(x))
+
+
+
 class InProjection(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
 
         self.w1 = nn.Linear(args.in_samples, args.hidden_dim, bias=False)
         self.w2 = nn.Linear(args.hidden_dim, args.dim, bias=False)
+        self.w3 = nn.Linear(args.in_samples, args.hidden_dim, bias=False)
+
+    def forward(self, x) -> torch.Tensor:
+        return self.w2(nn.functional.silu(self.w1(x)) * self.w3(x))
+
+class OutProjection(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+
+        self.w1 = nn.Linear(args.dim, args.hidden_dim, bias=False)
+        self.w2 = nn.Linear(args.hidden_dim, args.in_samples, bias=False)
         self.w3 = nn.Linear(args.dim, args.hidden_dim, bias=False)
 
     def forward(self, x) -> torch.Tensor:
@@ -218,28 +239,47 @@ class Transformer(nn.Module):
         self.n_local_layers = len(self.layers)
 
         # new stuff
-        self.p_
+        self.in_proj = InProjection(args)
+        self.out_proj = OutProjection(args)
+        self.chan_embeddings = nn.Embedding(8, args.dim) # hardcoded for now to 8 but could easily be bumped
+        self.chan_idx = torch.arange(8)
+        
 
 
 
     def forward(
         self,
-        x: torch.Tensor,
+        x: torch.Tensor, # b, t, c <- n_t, c
         seqlens: List[int],
         cache: Optional[RotatingBufferCache] = None,
     ) -> torch.Tensor:
         assert (
             len(seqlens) <= self.args.max_batch_size
         ), f"Max batch size is {self.args.max_batch_size}, got batch size of {len(seqlens)}"
+        (b, t, c) = x.shape # num_tok = b, t, c
 
 
-        (num_toks, chan) = x.shape # num_tok = b*t, chans
+        b = len(seqlens)
+        # x = torch.reshape(x, (b, t, chan)) # b, t, c
+        x = x.permute(0, 2, 1) # b, c, t
+
+        # x = x.reshspe(b,chan*t//256, 256)
+
+
+        h = self.in_proj(x) # b, c, dim = 4096
+
+        # this is hacky because we always have 8 c for the demo, but left to show it could scale
+        chan_emb = self.chan_embeddings(self.chan_idx.to(x.device))  # c, dim
+        chan_emb = chan_emb.unsqueeze(0).expand(b, -1, -1)  # b, c, dim
+        h = h + chan_emb  # b, c, dim
+
+
+        h = h.view(-1, self.args.dim)  # squash batch into time dim
+        num_toks = h.shape[0]
+
+
+
         assert sum(seqlens) == num_toks, (sum(seqlens), num_toks)
-
-
-        
-
-
 
         if cache is not None:
             input_metadata = cache.get_input_metadata(seqlens)
@@ -267,8 +307,11 @@ class Transformer(nn.Module):
         else:
             # Last rank has a final normalization step.
             assert self.norm is not None
-            return self.norm(h)
-
+            h = self.norm(h)
+            h = torch.reshape(h, (b, c, self.args.dim))
+            h = self.out_proj(h)
+            h = torch.reshape(h, (b, t, c))
+            return h
 
     @property
     def dtype(self) -> torch.dtype:
@@ -392,6 +435,8 @@ class Transformer(nn.Module):
                         self.pipeline_rank,
                     )
                     skipped.add(k)
+            elif k.startswith("in_proj") or k.startswith("out_proj"):
+                state_to_load[k] = v
             elif k.startswith("layers"):
                 layer_id = k.split(".")[1]
                 if layer_id in self.layers:
@@ -423,12 +468,11 @@ class Transformer(nn.Module):
             pipeline_rank = torch.distributed.get_rank()
         else:
             pipeline_rank = 0
-        with torch.device("meta"):
-            model = Transformer(
-                model_args,
-                pipeline_rank=pipeline_rank,
-                num_pipeline_ranks=num_pipeline_ranks,
-            )
+        model = Transformer(
+            model_args,
+            pipeline_rank=pipeline_rank,
+            num_pipeline_ranks=num_pipeline_ranks,
+        )
         loaded = torch.load(str(folder / "consolidated.00.pth"), mmap=True)
-        model.load_state_dict(loaded, assign=True)
+        model.load_state_dict(loaded, assign=True, strict=False)
         return model.to(device=device, dtype=dtype)
