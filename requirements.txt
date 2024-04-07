@@ -1,0 +1,6 @@
+numpy
+torch
+xformers
+sentencepiece
+simple_parsing
+fire

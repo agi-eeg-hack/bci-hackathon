@@ -1,3 +1,7 @@
 .venv
 __pycache__
 data_session/combined_dataset.csv
+models
+mistral-repo-src
+temp
+

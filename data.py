@@ -2,7 +2,6 @@ import csv
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Type
 
 
