@@ -11,6 +11,18 @@
             "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
             "justMyCode": true
+        },
+        {
+            "name": "Python: Mistral Interactive",
+            "type": "python",
+            "request": "launch",
+            "module": "main",
+            "args": [
+                "interactive",
+                "models/mistral-tar"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
     ]
 }

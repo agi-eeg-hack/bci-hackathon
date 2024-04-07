@@ -18,6 +18,7 @@ from xformers.ops.fmha import memory_efficient_attention
 
 @dataclass
 class ModelArgs(Serializable):
+    in_samples: int = 256
     dim: int
     n_layers: int
     head_dim: int
@@ -171,6 +172,17 @@ class TransformerBlock(nn.Module):
         out = h + r
         return out
 
+class InProjection(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+
+        self.w1 = nn.Linear(args.in_samples, args.hidden_dim, bias=False)
+        self.w2 = nn.Linear(args.hidden_dim, args.dim, bias=False)
+        self.w3 = nn.Linear(args.dim, args.hidden_dim, bias=False)
+
+    def forward(self, x) -> torch.Tensor:
+        return self.w2(nn.functional.silu(self.w1(x)) * self.w3(x))
+    
 
 class Transformer(nn.Module):
     def __init__(
@@ -205,6 +217,59 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleDict({str(i): layers[i] for i in range(offset, end)})
         self.n_local_layers = len(self.layers)
 
+        # new stuff
+        self.p_
+
+
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        seqlens: List[int],
+        cache: Optional[RotatingBufferCache] = None,
+    ) -> torch.Tensor:
+        assert (
+            len(seqlens) <= self.args.max_batch_size
+        ), f"Max batch size is {self.args.max_batch_size}, got batch size of {len(seqlens)}"
+
+
+        (num_toks, chan) = x.shape # num_tok = b*t, chans
+        assert sum(seqlens) == num_toks, (sum(seqlens), num_toks)
+
+
+        
+
+
+
+        if cache is not None:
+            input_metadata = cache.get_input_metadata(seqlens)
+        else:
+            input_metadata = SimpleInputMetadata.from_seqlens(seqlens, self.device)
+
+
+        freqs_cis = self.freqs_cis[input_metadata.positions]
+        for local_layer_id, layer in enumerate(self.layers.values()):
+            if cache is not None:
+                assert input_metadata is not None
+                cache_view = cache.get_view(local_layer_id, input_metadata)
+            else:
+                cache_view = None
+            h = layer(h, freqs_cis, cache_view)
+
+
+        if cache is not None:
+            cache.update_seqlens(seqlens)
+
+
+        if self.pipeline_rank < self.num_pipeline_ranks - 1:
+            torch.distributed.send(h, dst=self.pipeline_rank + 1)
+            return h
+        else:
+            # Last rank has a final normalization step.
+            assert self.norm is not None
+            return self.norm(h)
+
+
     @property
     def dtype(self) -> torch.dtype:
         return next(self.parameters()).dtype
@@ -212,7 +277,7 @@ class Transformer(nn.Module):
     @property
     def device(self) -> torch.device:
         return next(self.parameters()).device
-
+    
     @property
     def freqs_cis(self) -> torch.Tensor:
         # We cache freqs_cis but need to take care that it is on the right device
@@ -283,7 +348,7 @@ class Transformer(nn.Module):
             assert self.norm is not None
             return self.norm(h)
 
-    def forward(
+    def forward_original(
         self,
         input_ids: torch.Tensor,
         seqlens: List[int],
@@ -302,7 +367,7 @@ class Transformer(nn.Module):
         if self.num_pipeline_ranks > 1:
             torch.distributed.broadcast(outs, src=self.num_pipeline_ranks - 1)
         return outs.float()
-
+    
     def load_state_dict(self, state_dict, *args, **kwargs):
         state_to_load = {}
         skipped = set([])

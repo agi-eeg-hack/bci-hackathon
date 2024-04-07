@@ -9,7 +9,7 @@ def read_csv_neurosity_dataset(file):
     max_prediction_length = 1
     N = int(len(data) * 0.85)
 
-    data = data.head(10)
+    # data = data.head(10)
 
     data["index"] = data.index
 
@@ -40,7 +40,7 @@ def read_csv_neurosity_dataset(file):
         max_prediction_length=max_prediction_length,
         time_varying_unknown_reals=["CP3", "C3", "F5", "PO3", "PO4", "F6", "C4", "CP4"],
         time_varying_unknown_categoricals=["left_hand", "right_hand"],
-        time_varying_known_reals=["timestamp"],
+        # time_varying_known_reals=["timestamp"],
         time_varying_known_categoricals=["showing", "doing"],
     )
 
@@ -63,3 +63,20 @@ def read_csv_neurosity_dataset(file):
     )
 
     return train_dataloader, val_dataloader, training
+
+
+
+
+if __name__ == "__main__":
+    train_dataloader, val_dataloader, training = read_csv_neurosity_dataset(
+        "/workspace/evan/hack/gm/combined_dataset_finetune.csv"
+    )
+    
+    for x, y in train_dataloader:
+        x['encoder_cont'] # b, ts, c
+        # np.stack y 10 features take the 8 chans
+        # y is a python list y[0] is the list of 
+
+        # yt=np.concatenate(y[0][:8], axis=1) # b, c
+
+
