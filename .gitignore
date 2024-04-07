@@ -4,4 +4,5 @@ data_session/combined_dataset.csv
 models
 mistral-repo-src
 temp
-
+*.csv
+out.txt

@@ -4,3 +4,5 @@ xformers
 sentencepiece
 simple_parsing
 fire
+pytorch-forecasting
+pandas
