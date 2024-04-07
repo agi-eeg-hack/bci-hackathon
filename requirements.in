@@ -1,6 +1,14 @@
+# data_read
 neurosity
 attrs
 cattrs
 black
 mypy
-# torch
+
+# mistral
+fire
+sentencepiece
+torch
+xformers
+simple-parsing
+
