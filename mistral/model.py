@@ -236,6 +236,12 @@ class Transformer(nn.Module):
         offset = self.pipeline_rank * num_layers_per_rank
         end = min(self.n_layers, offset + num_layers_per_rank)
         self.layers = nn.ModuleDict({str(i): layers[i] for i in range(offset, end)})
+
+        # turn of
+        # for layer in self.layers.values():
+        #     for param in layer.parameters():
+        #         param.requires_grad = False
+
         self.n_local_layers = len(self.layers)
 
         # new stuff
@@ -294,7 +300,8 @@ class Transformer(nn.Module):
                 cache_view = cache.get_view(local_layer_id, input_metadata)
             else:
                 cache_view = None
-            h = layer(h, freqs_cis, cache_view)
+            with torch.no_grad():
+                h = layer(h, freqs_cis, cache_view)
 
 
         if cache is not None:
