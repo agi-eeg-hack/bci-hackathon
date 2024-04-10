@@ -6,4 +6,4 @@ Download README.excalidraw and open it using https://excalidraw.com/ to see an o
 
 ### disclaimer
 
-I did this with no sleep starting at 11pm pulling an all nighter for 10 hours straight for a hackathon. The code is to be taken with a grain of salt.
+I did this with no sleep starting at 11pm pulling an all nighter for 10 hours straight at a hackathon. The code is to be taken with a grain of salt.
